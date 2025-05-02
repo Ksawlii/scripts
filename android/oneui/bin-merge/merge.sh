@@ -27,7 +27,43 @@ BASE_TAR="$1"
 UPDATE_ZIP="$2"
 PATH="$PATH:$(pwd)/bin"
 MERGED="$OUT_DIR/merged"
-TOOLS="$(pwd)/bin/"
+TOOLS="$HOME/.local/bin/tools"
+
+DEPS(){
+    local DIR="$(readlink -f .)"
+  
+
+    if [ ! -f "$TOOLS/lpunpack" ] || [ ! -f "$TOOLS/simg2img" ]; then
+        if [ ! -d "$TOOLS/android-tools" ]; then
+            echo "Cloning android-tools"
+            git clone "https://github.com/nmeum/android-tools.git" "$TOOLS/android-tools" -q
+        fi
+        cd "$TOOLS/android-tools"
+        git submodule update --quiet --init --recursive
+        [ -d "$(pwd)/.git/rebase-apply" ] && git am "--abort"
+        cmake -B "build" -DCMAKE_C_COMPILER="clang" -DCMAKE_CXX_COMPILER="clang++" -DCMAKE_SYSTEM_NAME="$(uname -s)" -DCMAKE_SYSTEM_PROCESSOR="$(uname -m)" \
+                         -DCMAKE_BUILD_TYPE="Release" -DANDROID_TOOLS_USE_BUNDLED_FMT="ON" -DANDROID_TOOLS_USE_BUNDLED_LIBUSB="ON" >/dev/null
+        echo "Building android-tools"
+        make "-j$(nproc --all)" -C "build" >/dev/null
+   
+        [ ! -d "$TOOLS" ] && mkdir -p "$TOOLS"
+        cp -fa "build/vendor/lpunpack" "build/vendor/simg2img" "$TOOLS"
+    fi
+    
+    if [ ! -f "$TOOLS/BlockImageUpdate" ]; then
+        if [ ! -d "$TOOLS/imgpatchtools" ]; then
+            echo "Cloning imgpatchtools"
+            git clone "https://github.com/erfanoabdi/imgpatchtools.git" "$TOOLS/imgpatchtools" -q
+        fi
+        cd "$TOOLS/imgpatchtools"
+        make >/dev/null
+   
+        [ ! -d "$TOOLS" ] && mkdir -p "$TOOLS"
+        cp -fa "bin/BlockImageUpdate" "$TOOLS"
+    fi
+    
+    cd "$DIR"
+}
 
 CLEAN() {
     if [ -d "$OUT_DIR" ]; then
@@ -55,16 +91,14 @@ EXTRACT_LZ4(){
     lz4 -d -f -q "$AP_DIR/extracted/super.img.lz4" "$AP_DIR/extracted/super.img"
 }
 
-DESPARSE(){
-    echo "Desparsing super"
-    "$TOOLS/imjtool" "$AP_DIR/extracted/super.img" extract >/dev/null
-    mv "extracted/image.img" "$AP_DIR/super-desp.img"
-    rm -rf "extracted"
+CONVERT_RAW(){
+    echo "Converting super to raw"
+    "$TOOLS/simg2img" "$AP_DIR/extracted/super.img" "$AP_DIR/extracted/super-raw.img" >/dev/null
 }
 
 EXTRACT_SUPER(){
     echo "Extracting super"
-    "$TOOLS/lpunpack" "$AP_DIR/super-desp.img" "$AP_DIR" >/dev/null
+    "$TOOLS/lpunpack" "$AP_DIR/extracted/super-raw.img" "$AP_DIR" >/dev/null
 }
 
 EXTRACT_BIN(){
@@ -149,7 +183,7 @@ echo "===== Samsung Bin Firmware Merger ====="
 echo "Base firmware: $BASE_TAR"
 echo "Update binary: $UPDATE_ZIP"
 echo "Base script by @EndaDwagon (GitHub)"
-echo "completely rewriten by @Ksawlii (GitHub)"
+echo "Completely rewriten by @Ksawlii (GitHub)"
 echo ""
 
 if [ ! -d "$TOOLS" ]; then
@@ -162,6 +196,8 @@ if [ "$3" = "c" ]; then
     CLEAN 
 fi
 
+DEPS
+
 if [ ! -f "$AP_DIR/extracted/super.img.lz4" ]; then
     EXTRACT_AP 
 fi
@@ -170,8 +206,8 @@ if [ ! -f "$AP_DIR/extracted/super.img" ]; then
     EXTRACT_LZ4
 fi
 
-if [ ! -f "$AP_DIR/super-desp.img" ]; then
-    DESPARSE
+if [ ! -f "$AP_DIR/extracted/super-raw.img" ]; then
+    CONVERT_RAW
 fi
 
 if [ ! -f "$AP_DIR/odm.img" ] || [ ! -f "$AP_DIR/product.img" ] || [ ! -f "$AP_DIR/system.img" ] || [ ! -f "$AP_DIR/vendor.img" ]; then
